@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel
+  namespace: appsec
+  labels:
+    app: sentinel
+    component: security-automation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sentinel
+  template:
+    metadata:
+      labels:
+        app: sentinel
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: sentinel
+          image: aryanadityaa/appsec-sentinel:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "sentinel.py", "automate"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          env:
+            - name: SCAN_SCHEDULE
+              valueFrom:
+                configMapKeyRef:
+                  name: sentinel-config
+                  key: scan_schedule
+          volumeMounts:
+            - name: sentinel-data
+              mountPath: /app/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: sentinel-data
+          persistentVolumeClaim:
+            claimName: sentinel-data-pvc

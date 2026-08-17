@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  vulnerable_app:
+    build:
+      context: .
+      dockerfile: vulnerable_app/Dockerfile
+    ports:
+      - "5060:5060"
+    volumes:
+      - ./logs:/app/logs
+
+  detector:
+    build:
+      context: .
+      dockerfile: detector/Dockerfile
+    depends_on:
+      - vulnerable_app
+    volumes:
+      - ./logs:/app/logs

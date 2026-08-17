@@ -1,0 +1,225 @@
+name: Sentinel AppSec Pipeline
+
+# Scans every PR into main, plus pushes to main and a nightly schedule.
+# Mirrors the platform's own design doc (docs/design/HLD.md -> "Deployment Path").
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * *"   # nightly, matches pipeline/k8s/cronjob.yaml schedule
+  workflow_dispatch: {}
+
+env:
+  IMAGE_NAME: sentinel-pipeline
+
+jobs:
+  # ---------------------------------------------------------------------
+  # 1. SAST + secrets + DAST scan, gated: build fails on any critical finding
+  # ---------------------------------------------------------------------
+  scan:
+    name: Scan (SAST / DAST / Secrets)
+    runs-on: ubuntu-latest
+    outputs:
+      findings_json: ${{ steps.scan.outputs.findings_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pipeline dependencies
+        working-directory: platform/pipeline
+        run: pip install -r requirements.txt
+
+      # NOTE: intentionally using plain `>` redirection, not `| tee`.
+      # GitHub Actions' default (unspecified) shell is `bash -e {0}` *without*
+      # -o pipefail (pipefail is only added when `shell: bash` is set explicitly
+      # on the step). Piping through tee would let a failing scan's exit code
+      # get masked by tee's own (always-0) exit code, silently defeating the
+      # --fail-on gate. Plain redirection preserves sentinel.py's real exit code.
+      - name: Run SAST scan on the repo, gate on critical
+        id: scan
+        working-directory: platform/pipeline
+        run: |
+          python3 sentinel.py scan .. \
+            --type sast \
+            --output json \
+            --exclude test_fixtures \
+            --exclude .git \
+            --exclude node_modules \
+            --fail-on critical \
+            > sast-findings.json
+          echo "findings_path=platform/pipeline/sast-findings.json" >> "$GITHUB_OUTPUT"
+
+      - name: Show SAST findings in the log
+        if: always()
+        working-directory: platform/pipeline
+        run: cat sast-findings.json 2>/dev/null || echo 'sast-findings.json not generated (earlier step may have failed)'
+
+      - name: Run secrets scan, gate on critical
+        working-directory: platform/pipeline
+        run: |
+          python3 sentinel.py scan .. \
+            --type secrets \
+            --output json \
+            --exclude test_fixtures \
+            --exclude .git \
+            --exclude node_modules \
+            --fail-on critical \
+            > secrets-findings.json
+
+      - name: Show secrets findings in the log
+        if: always()
+        working-directory: platform/pipeline
+        run: cat secrets-findings.json 2>/dev/null || echo 'secrets-findings.json not generated (earlier step may have failed)'
+
+      - name: Run DAST against bundled demo target, gate on critical
+        working-directory: platform/pipeline
+        run: |
+          python3 sentinel.py scan . \
+            --type dast \
+            --output json \
+            --fail-on critical \
+            > dast-findings.json
+
+      - name: Show DAST findings in the log
+        if: always()
+        working-directory: platform/pipeline
+        run: cat dast-findings.json 2>/dev/null || echo 'dast-findings.json not generated (earlier step may have failed)'
+
+      - name: Upload raw scan findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-findings
+          path: |
+            platform/pipeline/sast-findings.json
+            platform/pipeline/secrets-findings.json
+            platform/pipeline/dast-findings.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------
+  # 2. Build the Docker image
+  # ---------------------------------------------------------------------
+  build:
+    name: Build Docker image
+    needs: scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (loaded locally, not pushed)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./platform/pipeline
+          file: ./platform/pipeline/Dockerfile
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image as artifact for the Trivy job
+        run: docker save ${{ env.IMAGE_NAME }}:${{ github.sha }} -o image.tar
+
+      - name: Upload image tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+          retention-days: 1
+
+  # ---------------------------------------------------------------------
+  # 3. Trivy scan of the built image
+  # ---------------------------------------------------------------------
+  image-scan:
+    name: Trivy image scan
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+
+      - name: Load image
+        run: docker load -i image.tar
+
+      # Pinned to a commit SHA, not a mutable version tag (aquasecurity/trivy-action
+      # had a real supply-chain compromise in March 2026 where an attacker force-pushed
+      # malicious code to nearly all of its version tags). This SHA is the verified,
+      # GPG-signed v0.36.0 release published after the incident.
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          input: image.tar
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+
+      - name: Upload Trivy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-results.sarif
+          if-no-files-found: warn
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"
+
+  # ---------------------------------------------------------------------
+  # 4. Build the unified ATT&CK coverage / metrics report and upload it
+  # ---------------------------------------------------------------------
+  report:
+    name: Build metrics report
+    needs: scan
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pipeline dependencies
+        working-directory: platform/pipeline
+        run: pip install -r requirements.txt
+
+      - name: Populate the vuln DB so the dashboard has data
+        working-directory: platform/pipeline
+        run: python3 sentinel.py scan . --type all --save --output json > /dev/null
+        continue-on-error: true
+
+      - name: Generate unified ATT&CK coverage / MTTD dashboard
+        working-directory: platform
+        run: python3 scripts/unified_report.py
+
+      - name: Generate MTTR / trend summary (terminal output, captured to file)
+        working-directory: platform/pipeline
+        run: python3 sentinel.py dashboard --type full --days 30 > dashboard-summary.txt
+
+      - name: Upload metrics report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-metrics-report
+          path: |
+            platform/scripts/unified_dashboard.html
+            platform/pipeline/dashboard-summary.txt
+          if-no-files-found: warn

@@ -1,0 +1,51 @@
+# Runs a security scan automatically every night and feeds the dashboard.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sentinel-nightly-scan
+  namespace: appsec
+spec:
+  schedule: "0 2 * * *"  # 2 AM daily
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: sentinel-scan
+              image: aryanadityaa/appsec-sentinel:latest
+              command: ["python3", "sentinel.py", "scan", "/repo", "--type", "all", "--save"]
+              volumeMounts:
+                - name: repo-checkout
+                  mountPath: /repo
+                - name: sentinel-data
+                  mountPath: /app/data
+          restartPolicy: OnFailure
+          volumes:
+            - name: repo-checkout
+              emptyDir: {}
+            - name: sentinel-data
+              persistentVolumeClaim:
+                claimName: sentinel-data-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sentinel-data-pvc
+  namespace: appsec
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinel-config
+  namespace: appsec
+data:
+  scan_schedule: "0 2 * * *"
+  sla_critical_days: "7"
+  sla_high_days: "14"

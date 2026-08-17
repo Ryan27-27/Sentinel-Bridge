@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Sentinel Range — Purple Team Dashboard</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#0d1117; color:#e6edf3; margin:0; padding:32px; }
+  h1 { font-size:22px; margin-bottom:4px; }
+  .sub { color:#8b949e; margin-bottom:24px; }
+  .stats { display:flex; gap:16px; margin-bottom:24px; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px 20px; flex:1; }
+  .card .label { color:#8b949e; font-size:12px; text-transform:uppercase; }
+  .card .value { font-size:26px; font-weight:700; margin-top:4px; }
+  table { width:100%; border-collapse:collapse; background:#161b22; border:1px solid #30363d; border-radius:8px; overflow:hidden; }
+  th, td { text-align:left; padding:10px 14px; border-bottom:1px solid #30363d; font-size:13px; }
+  th { background:#0d1117; color:#8b949e; text-transform:uppercase; font-size:11px; }
+  tr:last-child td { border-bottom:none; }
+</style>
+</head>
+<body>
+  <h1>Sentinel Range — Purple Team Dashboard</h1>
+  <div class="sub">Red-team attack chain vs. blue-team detection engine, mapped to MITRE ATT&amp;CK</div>
+  <div class="stats">
+    <div class="card"><div class="label">Techniques Attempted</div><div class="value">4</div></div>
+    <div class="card"><div class="label">Detected</div><div class="value">3/4</div></div>
+    <div class="card"><div class="label">Detection Rate</div><div class="value">75%</div></div>
+    <div class="card"><div class="label">Avg. MTTD</div><div class="value">0.32s</div></div>
+  </div>
+  <table>
+    <thead><tr><th>ATT&amp;CK ID</th><th>Technique</th><th>First Attack Time (UTC)</th><th>Status</th><th>MTTD</th><th>Alerts Fired</th></tr></thead>
+    <tbody>
+        <tr>
+          <td>T1078</td>
+          <td>Valid Accounts (Access Control Bypass)</td>
+          <td>2026-07-26T13:20:53.776532+00:00</td>
+          <td><span style="color:#1a7f37;font-weight:600;">DETECTED</span></td>
+          <td>0.51s</td>
+          <td>1</td>
+        </tr>
+        <tr>
+          <td>T1190</td>
+          <td>Exploit Public-Facing Application</td>
+          <td>2026-07-26T13:20:52.551879+00:00</td>
+          <td><span style="color:#1a7f37;font-weight:600;">DETECTED</span></td>
+          <td>0.33s</td>
+          <td>3</td>
+        </tr>
+        <tr>
+          <td>T1550.001</td>
+          <td>Use Alternate Authentication Material (Forged JWT)</td>
+          <td>2026-07-26T13:20:54.550099+00:00</td>
+          <td><span style="color:#1a7f37;font-weight:600;">DETECTED</span></td>
+          <td>0.13s</td>
+          <td>1</td>
+        </tr>
+        <tr>
+          <td>T1595</td>
+          <td>Active Scanning</td>
+          <td>2026-07-26T13:20:51.729133+00:00</td>
+          <td><span style="color:#c62828;font-weight:600;">MISSED</span></td>
+          <td>-</td>
+          <td>0</td>
+        </tr>
+    </tbody>
+  </table>
+</body>
+</html>
