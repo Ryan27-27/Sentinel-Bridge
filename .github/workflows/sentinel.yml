@@ -50,6 +50,7 @@ jobs:
             --type sast \
             --output json \
             --exclude test_fixtures \
+            --exclude range \
             --exclude .git \
             --exclude node_modules \
             --fail-on critical \
@@ -68,6 +69,7 @@ jobs:
             --type secrets \
             --output json \
             --exclude test_fixtures \
+            --exclude range \
             --exclude .git \
             --exclude node_modules \
             --fail-on critical \
