@@ -1,125 +1,129 @@
-# Sentinel — A Purple Team AppSec Platform
+# Sentinel
 
-One platform, two loops, the same vocabulary: **find vulnerabilities before ship, and prove you can
-both exploit and detect them at runtime.** Built to demonstrate the full skill set a Security
-Engineer / AppSec Engineer / purple-team role actually needs — not a red-team CTF writeup on its
-own, not a defensive SIEM dashboard on its own, but both sides of the same coin, cross-referenced
-against MITRE ATT&CK.
+Sentinel is a two-part AppSec lab I built to cover both sides of application security instead of
+just one. Most portfolio projects are either a scanner (find bugs before release) or a SIEM-style
+detector (catch attacks at runtime) — I wanted something that does both and actually connects them,
+because that's closer to how a real purple-team workflow works: you find a vulnerability class
+statically, and separately you need to know whether your detections would actually catch someone
+exploiting that same class live.
 
-> ⚠️ Lab project. Both halves contain deliberately vulnerable applications for demonstration.
-> Run in an isolated environment only.
+There are two subprojects, plus a small script that ties their output together:
 
-## Why this exists
+- **`pipeline/`** — a CI/CD-style AppSec pipeline. SAST + DAST + secrets scanning, a SQLite-backed
+  triage workflow, dedup/auto-routing/SLA automation, and a terminal metrics dashboard. This is the
+  "find it before it ships" half.
+- **`range/`** — a small vulnerable Flask API, an automated exploit chain that attacks it, and a
+  log-based detector that has to catch each attack in near real time. This is the "if it ships
+  anyway, do we notice" half.
+- **`scripts/unified_report.py`** — joins the two on MITRE ATT&CK technique ID. A finding from
+  `pipeline` (e.g. `CWE-89` SQL injection) and a live detection from `range` (`T1190`) land on the
+  same coverage row instead of two dashboards that never talk to each other.
 
-Most portfolios show offense *or* defense. Companies hiring for security engineering — including
-product-security teams at SaaS companies like Rippling — want someone who can sit in the SSDLC
-(shift-left scanning, triage, CI/CD gates) **and** reason like an attacker when validating that
-defenses actually catch something. This repo is structured to make that overlap explicit:
+Both halves were separate repos originally. `pipeline/scanner/attack_mapping.py` is the piece that
+actually merges them — it maps every CWE the scanner can find to an ATT&CK technique ID, which is
+what makes the unified report possible.
 
-| | Pipeline (`/pipeline`) | Range (`/range`) |
-|---|---|---|
-| **Question it answers** | "Did we ship a vulnerability?" | "If someone exploits it, do we notice — and how fast?" |
-| **Role it demonstrates** | AppSec engineering, SSDLC integration, triage/SLA ops | Red-team execution, detection engineering, incident metrics |
-| **Output** | Findings dashboard, MTTR, CI security gate | MITRE ATT&CK coverage, Mean Time To Detect (MTTD) |
-| **Framework language** | CWE / OWASP Top 10, now also mapped to ATT&CK IDs | MITRE ATT&CK technique IDs natively |
+> **Lab project — don't deploy this anywhere real.** Both `pipeline/dast_target/` and
+> `range/vulnerable_app/` are intentionally, deliberately insecure. That's the point. Keep it local.
 
-The two were previously separate repos. The concrete thing tying them together in this version:
-`pipeline/scanner/attack_mapping.py` maps every CWE the SAST/DAST scanner finds to a MITRE ATT&CK
-technique ID (e.g. `CWE-89` SQL injection → `T1190`), so a static/dynamic finding from the pipeline
-and a live detection from the range report on the **same coverage matrix** instead of two
-disconnected dashboards. That's the "changes required" part of combining these — see below.
-
-## Architecture
+## How it fits together
 
 ![Sentinel platform architecture](docs/architecture.svg)
 
 ```
 sentinel-platform/
-├── pipeline/     AppSec Pipeline Sentinel — SAST/DAST/secrets scanning, triage, SLA/MTTR,
-│                 CI/CD security gate, Kubernetes deploy. CLI: `python3 sentinel.py`
-│                 → findings now carry an `attack_id` (ATT&CK technique) alongside CWE/OWASP
-└── range/        Sentinel Range — vulnerable Flask target + automated exploit chain (red) +
-                  log-based detection engine (blue) + MTTD dashboard, natively ATT&CK-mapped
+├── pipeline/     scan -> triage -> dashboard -> automate. CLI: python3 sentinel.py
+├── range/        vulnerable target -> exploit chain -> detector -> MTTD report
+└── scripts/      unified_report.py joins both by ATT&CK technique ID
 ```
 
 ## Quick start
 
-**Pipeline** (scan → triage → dashboard → automate):
+**pipeline** — scan, triage, dashboard, automate, all in one command:
 ```bash
 cd pipeline
-python3 -m venv venv && source venv/bin/activate      # PEP 668 environments (Ubuntu 23.04+/Debian 12+)
+python3 -m venv venv && source venv/bin/activate   # PEP 668 environments (Ubuntu 23.04+/Debian 12+) need this
 pip install -r requirements.txt
 python3 sentinel.py demo
 ```
 
-**Range** (attack → detect → MTTD report):
+**range** — attack, detect, MTTD report, three terminals:
 ```bash
 cd range
 pip install -r requirements.txt
-python3 vulnerable_app/app.py            # terminal 1 — runs on :5060
-python3 detector/detection_engine.py --follow   # terminal 2
-python3 attacker/exploit_runner.py       # terminal 3
+
+# terminal 1
+python3 vulnerable_app/app.py            # runs on :5060
+
+# terminal 2
+python3 detector/detection_engine.py --follow
+
+# terminal 3
+python3 attacker/exploit_runner.py
 python3 dashboard/report_generator.py && open dashboard/dashboard.html
 ```
 
-Both can run at the same time without a port clash — `range`'s demo target was moved to `:5060`
-(from `:5050`) specifically because `pipeline`'s own bundled DAST target already uses `:5050`.
-That's the other concrete integration fix: these were built as two independent repos and would
-have collided if you tried to demo both live in one sitting.
+You can run both at the same time — `range`'s target sits on `:5060` and `pipeline`'s bundled DAST
+target sits on `:5050`, so they don't collide. That wasn't the case when these were two separate
+repos and is one of the first things I had to fix when merging them.
 
-Each subproject keeps its own detailed README (`pipeline/README.md`, `range/README.md`) for
-CI/CD, Docker, and Kubernetes instructions.
+Each subproject has its own README with the full command reference — `pipeline/README.md` covers
+Docker/Kubernetes/CI, `range/README.md` covers the seeded vulnerabilities and detection rules in
+detail.
 
-**Unified report** (joins both halves on ATT&CK technique ID):
+**unified report** — joins both halves by ATT&CK technique ID:
 ```bash
 python3 scripts/unified_report.py
 open scripts/unified_dashboard.html
 ```
-Pulls open findings out of `pipeline`'s DB (auto-seeded with demo data on first run) and joins
-them against `range`'s attack/detection logs by MITRE ATT&CK ID — one table showing, per
-technique, whether it was caught pre-release, whether it was exploited-and-detected at runtime,
-and whether it's covered on both sides. Falls back to the checked-in `range/sample_run/` logs if
-you haven't run a live attack chain yet, so it works with zero setup.
+This reads open findings out of the pipeline's SQLite DB (it seeds itself with demo data on first
+run) and matches them against the range's attack/detection logs by MITRE ATT&CK ID, so you get one
+table per technique: caught pre-release? exploited and detected at runtime? both? If you haven't
+run a live attack chain yet it falls back to the logs checked into `range/sample_run/`, so this
+works even with zero setup.
 
-## What this demonstrates for a purple-team / security engineer role
+## What's actually going on under the hood
 
-- **Shift-left AppSec**: SAST/DAST/secrets scanning wired into a CI/CD gate that fails builds on
-  critical findings, plus triage workflow and SLA/MTTR tracking — the day-to-day of an AppSec
-  engineering team.
-- **Adversary simulation**: an automated exploit chain (SQLi, IDOR, JWT `alg=none` forgery, recon)
-  run against a real HTTP target, not a theoretical write-up.
-- **Detection engineering**: log-based detection rules built to catch exactly those techniques,
-  with an honest reporting of what's *not* caught (plain recon traffic) rather than an inflated
-  detection rate.
-- **Framework fluency**: CWE, OWASP Top 10, and MITRE ATT&CK used consistently and cross-mapped,
-  which is how real security teams communicate risk across offense and defense.
-- **Platform engineering**: Docker, Kubernetes manifests, GitHub Actions CI/CD, and a TypeScript
-  Slack notifier — the deployment and tooling maturity expected of a production security platform,
-  not just a script.
+`pipeline/scanner/engine.py` does the scanning — SAST is regex/AST-style pattern matching over the
+target directory (SQL string concatenation, `eval`/`os.system` calls, weak hashes, hardcoded
+secrets), DAST sends real HTTP requests at a running target (header checks, an XSS probe, an IDOR
+comparison across a few IDs, open-redirect and cookie-flag checks), and the secrets scanner is
+straightforward regex over common credential patterns (AWS keys, generic API tokens, etc). Every
+finding gets a CWE ID, and `attack_mapping.py` looks that CWE up in a small hand-maintained table
+to attach an ATT&CK technique ID where one clearly applies — it deliberately returns nothing for
+CWEs that don't have a solid mapping rather than guessing.
 
-## Honest limitations (worth saying out loud in an interview)
+Findings land in a SQLite DB (`aggregator/db.py`), and `automation/pipeline.py` runs three passes
+over them: dedup near-identical findings, auto-route by file path to a team (`devops-team`,
+`security-team`, etc.), and flag anything past its SLA window. `dashboard/metrics.py` turns all of
+that into the terminal tables you see from `sentinel.py dashboard` — severity counts, MTTR vs SLA
+target, scan history, pipeline health.
 
-- Detection rules are regex/heuristic-based, not a real SIEM (ELK/Wazuh) — called out explicitly
-  as a "possible extension" in `range/README.md`.
-- `pipeline`'s Docker build and Kubernetes manifests are written to standard patterns but not yet
-  verified end-to-end against a live daemon/cluster — noted in `pipeline/README.md`.
-- The ATT&CK mapping in `pipeline/scanner/attack_mapping.py` is deliberately conservative: only
-  CWEs with a well-established technique correspondence are mapped, unmapped CWEs return an empty
-  string rather than a guessed technique.
+`range/` is simpler: `vulnerable_app/app.py` is a small Flask API with three real bugs seeded on
+purpose (string-built SQL query, an endpoint that returns any user's profile with no ownership
+check, and a JWT check that accepts `alg=none`). `attacker/exploit_runner.py` walks through
+recon, then exercises all three. `detector/detection_engine.py` tails the app's access log and
+runs independent detection logic for each — a SQLi signature match, a sliding window that flags
+an IP touching 3+ distinct user IDs in 5 seconds, and a JWT header decode that flags unsigned
+tokens. Recon traffic on its own isn't detected, on purpose — plain GETs to public endpoints are
+indistinguishable from normal traffic, and I'd rather the dashboard show a real 75% detection rate
+than fudge a rule just to hit 100%.
 
-## Suggested next changes (if you want to keep building this out)
+## Limitations, as of right now
 
-1. Extend `range` with a 4th vulnerability class (SSRF or path traversal) so its ATT&CK coverage
-   overlaps more of what `pipeline`'s SAST rules already flag statically.
-2. Rename the CLI banners/`author` strings inside `pipeline/sentinel.py` and repo metadata to your
-   own name before publishing — the uploaded copy still has a placeholder author.
+- Detection in `range` is regex/heuristic, not a real SIEM. Wiring the same logs into
+  Elastic/Wazuh is the obvious next step if this needs to look more production-grade.
+- `pipeline`'s Dockerfile and Kubernetes manifests follow standard patterns but I haven't run them
+  against a live Docker daemon or a real cluster yet — worth testing before trusting them.
+- The CWE → ATT&CK table is intentionally small. Extending `range` with a 4th vulnerability class
+  (SSRF or path traversal, most likely) would let it overlap more of what the pipeline already
+  flags statically.
 
+## Design docs
 
-## System Design
+Wrote these up separately since they got long enough to not belong in this file:
 
-| Document | Description |
-|----------|-------------|
-| docs/design/HLD.md | High Level Design |
-| docs/design/LLD.md | Low Level Design |
-| docs/design/sequence-diagrams.md | Sequence diagrams |
-| docs/design/data-flow.md | Data flow diagrams |
+- [`docs/design/HLD.md`](docs/design/HLD.md) — high-level design
+- [`docs/design/LLD.md`](docs/design/LLD.md) — low-level design
+- [`docs/design/sequence-diagrams.md`](docs/design/sequence-diagrams.md) — sequence diagrams
+- [`docs/design/data-flow.md`](docs/design/data-flow.md) — data flow
