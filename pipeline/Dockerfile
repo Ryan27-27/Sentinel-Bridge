@@ -1,7 +1,7 @@
 # AppSec Pipeline Sentinel — multi-stage Docker build
 
 # Stage 1: build ffuf from source (keeps final image lean — no Go toolchain in the runtime image)
-FROM golang:1.22-alpine AS ffuf-builder
+FROM golang:1.26-alpine AS ffuf-builder
 RUN apk add --no-cache git
 RUN go install github.com/ffuf/ffuf/v2@latest
 
