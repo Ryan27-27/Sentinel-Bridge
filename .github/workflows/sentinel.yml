@@ -33,7 +33,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install pipeline dependencies
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: pip install -r requirements.txt
 
       # NOTE: intentionally using plain `>` redirection, not `| tee`.
@@ -44,7 +44,7 @@ jobs:
       # --fail-on gate. Plain redirection preserves sentinel.py's real exit code.
       - name: Run SAST scan on the repo, gate on critical
         id: scan
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: |
           python3 sentinel.py scan .. \
             --type sast \
@@ -54,15 +54,15 @@ jobs:
             --exclude node_modules \
             --fail-on critical \
             > sast-findings.json
-          echo "findings_path=platform/pipeline/sast-findings.json" >> "$GITHUB_OUTPUT"
+          echo "findings_path=pipeline/sast-findings.json" >> "$GITHUB_OUTPUT"
 
       - name: Show SAST findings in the log
         if: always()
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: cat sast-findings.json 2>/dev/null || echo 'sast-findings.json not generated (earlier step may have failed)'
 
       - name: Run secrets scan, gate on critical
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: |
           python3 sentinel.py scan .. \
             --type secrets \
@@ -75,11 +75,11 @@ jobs:
 
       - name: Show secrets findings in the log
         if: always()
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: cat secrets-findings.json 2>/dev/null || echo 'secrets-findings.json not generated (earlier step may have failed)'
 
       - name: Run DAST against bundled demo target, gate on critical
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: |
           python3 sentinel.py scan . \
             --type dast \
@@ -89,7 +89,7 @@ jobs:
 
       - name: Show DAST findings in the log
         if: always()
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: cat dast-findings.json 2>/dev/null || echo 'dast-findings.json not generated (earlier step may have failed)'
 
       - name: Upload raw scan findings
@@ -98,9 +98,9 @@ jobs:
         with:
           name: scan-findings
           path: |
-            platform/pipeline/sast-findings.json
-            platform/pipeline/secrets-findings.json
-            platform/pipeline/dast-findings.json
+            pipeline/sast-findings.json
+            pipeline/secrets-findings.json
+            pipeline/dast-findings.json
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------
@@ -120,8 +120,8 @@ jobs:
       - name: Build image (loaded locally, not pushed)
         uses: docker/build-push-action@v5
         with:
-          context: ./platform/pipeline
-          file: ./platform/pipeline/Dockerfile
+          context: ./pipeline
+          file: ./pipeline/Dockerfile
           tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           load: true
           push: false
@@ -199,20 +199,20 @@ jobs:
           python-version: "3.11"
 
       - name: Install pipeline dependencies
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: pip install -r requirements.txt
 
       - name: Populate the vuln DB so the dashboard has data
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: python3 sentinel.py scan . --type all --save --output json > /dev/null
         continue-on-error: true
 
       - name: Generate unified ATT&CK coverage / MTTD dashboard
-        working-directory: platform
+        working-directory: .
         run: python3 scripts/unified_report.py
 
       - name: Generate MTTR / trend summary (terminal output, captured to file)
-        working-directory: platform/pipeline
+        working-directory: pipeline
         run: python3 sentinel.py dashboard --type full --days 30 > dashboard-summary.txt
 
       - name: Upload metrics report artifact
@@ -220,6 +220,6 @@ jobs:
         with:
           name: sentinel-metrics-report
           path: |
-            platform/scripts/unified_dashboard.html
-            platform/pipeline/dashboard-summary.txt
+            scripts/unified_dashboard.html
+            pipeline/dashboard-summary.txt
           if-no-files-found: warn
